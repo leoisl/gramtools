@@ -10,9 +10,10 @@ apt-get install -y \
     python3-pip \
     autoconf \
     sudo \
-    wget
+    wget \
+    zlib1g-dev
 
-sudo pip3 install git+https://github.com/iqbal-lab-org/gramtools
+sudo pip3 install -vvv --process-dependency-links wheel git+https://github.com/iqbal-lab-org/gramtools
 
 apt-get autoremove --purge -y \
     cmake \
