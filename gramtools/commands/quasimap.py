@@ -1,3 +1,5 @@
+## @file
+# Executes `gram quasimap` backend for variant aware backward searching.
 import os
 import time
 import json
@@ -24,7 +26,7 @@ def parse_args(common_parser, subparsers):
                         action="append",
                         type=str)
 
-    # depreciated, use --output-directory
+    # deprecated, use --output-directory
     parser.add_argument('--run-directory',
                         help='',
                         type=str,
@@ -133,7 +135,7 @@ def run(args):
     setattr(args, 'kmer_size', kmer_size)
 
     if args.run_directory is not None:
-        log.warning("Depreciated argument: --run-directory; instead use: --output-directory")
+        log.warning("Deprecated argument: --run-directory; instead use: --output-directory")
         args.output_directory = args.run_directory
 
     start_time = str(time.time()).split('.')[0]

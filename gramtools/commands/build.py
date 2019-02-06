@@ -1,3 +1,7 @@
+## @file
+# Build/load a population reference genome and set it up for quasimapping.
+# Either a vcf/reference is passed and a prg generated from it, or an existing prg is passed.
+# Once the prg is stored the back-end `build` routine is called, producing the encoded prg, its fm-index, and other supporting data structures.
 import os
 import time
 import json
@@ -24,20 +28,20 @@ def parse_args(common_parser, subparsers):
                         required=True)
 
     parser.add_argument('--vcf',
-                        help='',
+                        help='File containing variant information to capture in the prg.',
                         action="append",
                         type=str)
     parser.add_argument('--reference',
-                        help='',
+                        help='Reference the vcf file refers to, used to build non-variant parts of the prg.',
                         type=str,
                         required=False)
     parser.add_argument('--prg',
-                        help='',
+                        help='A prg can be passed in directly instead of a vcf/reference combination.',
                         type=str,
                         required=False)
 
     parser.add_argument('--kmer-size',
-                        help='',
+                        help='Kmer size for indexing the prg. Defaults to 5.',
                         type=int,
                         default=5,
                         required=False)
@@ -52,8 +56,9 @@ def parse_args(common_parser, subparsers):
                         default=150,
                         required=False)
 
+    # The default behaviour is to generate an index of all possible kmers of size `kmer-size`
     parser.add_argument('--all-kmers',
-                        help='',
+                        help='Whether or not all kmers of given size should be indexed.',
                         action='store_true',
                         required=False)
 
@@ -64,6 +69,7 @@ def parse_args(common_parser, subparsers):
                         required=False)
 
 
+## Checks prg file exists and copies it to gram directory.
 def _skip_prg_construction(build_paths, report, args):
     if report.get('return_value_is_0') is False:
         report['prg_build_report'] = {
@@ -87,6 +93,7 @@ def _skip_prg_construction(build_paths, report, args):
     return report
 
 
+## Calls perl utility that converts a vcf and fasta reference into a linear prg.
 def _execute_command_generate_prg(build_paths, report, _):
     if report.get('return_value_is_0') is False:
         report['prg_build_report'] = {
@@ -124,7 +131,7 @@ def _execute_command_generate_prg(build_paths, report, _):
     ])
     return report
 
-
+## Executes `gram build` backend.
 def _execute_gramtools_cpp_build(build_paths, report, args):
     if report.get('return_value_is_0') is False:
         report['gramtools_cpp_build'] = {
@@ -198,7 +205,8 @@ def _save_report(start_time,
     with open(report_file_path, 'w') as fhandle:
         json.dump(_report, fhandle, indent=4)
 
-
+## Combines multiple vcf files together using external python utility.
+# Records where the REF overlaps are merged together and all possible haplotypes enumerated.
 def _handle_multi_vcf(vcf_files, command_paths):
     if not vcf_files:
         command_paths['vcf'] = ''

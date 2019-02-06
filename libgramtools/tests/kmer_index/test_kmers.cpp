@@ -1362,7 +1362,10 @@ TEST(GetAllReverseKmers, SecondVariantSiteEndsAtPrgEnd_CorrectReverseKmers) {
     EXPECT_EQ(result, expected);
 }
 
-
+/**
+ * @note the expected elements are written out in an easier to read right-to-left order;
+ * but are stored in ordered fashion ({2,1,1,4,2} first).
+ */
 TEST(GetAllReverseKmers, KmersOverlappingTwoVariantSites_CorrectReverseKmers) {
     auto prg_raw = "cta5g6a5cgt7cc8t7";
     auto prg_info = generate_prg_info(prg_raw);
@@ -1502,8 +1505,8 @@ TEST(GetKmerPrefixDiffs, GivenPrgAndTargetKmer_CorrespondingPrefixDiffEntryFound
     auto kmer_it = std::find(kmers.begin(), kmers.end(), kmer);
     auto index = std::distance(kmers.begin(), kmer_it);
 
-    auto prefix_diffs = get_kmer_prefix_diffs(parameters,
-                                              prg_info);
+    auto prefix_diffs = get_all_kmer_and_compute_prefix_diffs(parameters,
+                                                              prg_info);
     auto result = prefix_diffs[index];
     Pattern expected = {4, 3, 3, 1, 1, 2, 3, 3, 2, 4, 2, 3};
     EXPECT_EQ(result, expected);

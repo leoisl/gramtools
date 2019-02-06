@@ -1,3 +1,12 @@
+/**
+ * @file
+ * Build an index into search states in the PRG in order to speed up read quasimapping.
+ * The index maps a kmer to a set of `SearchStates`: variant site paths and SA intervals.
+ * Then during quasimapping the search is initialised to the read's last kmer index entry.
+ *
+ * Kmer size is passed as a parameter. Either all kmers of this size are enumerated, or all kmers associated with variant
+ * sites in the PRG are searched for in a given PRG.
+ */
 #include "common/utils.hpp"
 #include "common/parameters.hpp"
 #include "prg/prg.hpp"
@@ -12,6 +21,9 @@
 
 namespace gram {
 
+    /**
+     * Stores the total number of indexed kmers, the total number of computed `gram::SA_Interval`s, and the total number of traversed `gram::VariantLocus`.
+     */
     struct KmerIndexStats {
         uint64_t count_kmers;
         uint64_t count_search_states;
@@ -28,6 +40,12 @@ namespace gram {
         };
     };
 
+
+    /**
+     * For each kmer, find its `SearchStates` and populate the `KmerIndex`.
+     * @see update_full_kmer()
+     * @see update_kmer_index_cache()
+     */
     KmerIndex index_kmers(const Patterns &kmers, const int kmer_size, const PRG_Info &prg_info);
 
     namespace kmer_index {
