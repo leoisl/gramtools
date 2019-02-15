@@ -19,6 +19,24 @@ TEST(Quasimap, GivenReadAndKmerSize_CorrectKmerReturned) {
     EXPECT_EQ(result, expected);
 }
 
+TEST(Quasimap, ReadTotallySkippingAVariationSite) {
+    auto prg_raw = "aaaaa5t6c5gggggg";
+    auto prg_info = generate_prg_info(prg_raw);
+    auto coverage = coverage::generate::empty_structure(prg_info);
+
+    Pattern kmer = encode_dna_bases("ggggg");
+    Patterns kmers = {kmer};
+    Parameters parameters = {};
+    parameters.kmers_size = 5;
+    auto kmer_index = index_kmers(kmers, parameters.kmers_size, prg_info);
+
+    const auto read = encode_dna_bases("aaaaaggggg");
+
+    bool read_mapped_exactly = quasimap_read(read, coverage, kmer_index, prg_info, parameters);
+
+    EXPECT_EQ(read_mapped_exactly, false);
+}
+
 
 TEST(Quasimap, ReadCrossingSecondVariantSecondAllele_CorrectAlleleCoverage) {
     auto prg_raw = "gct5c6g6t5ag7t8c7cta";
