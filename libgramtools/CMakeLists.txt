@@ -113,25 +113,12 @@ target_link_libraries(gramtools LINK_PUBLIC
         ${EXTERN_LIBS}
         ${BZIP2_LIBRARIES}
         ${CMAKE_CURRENT_BINARY_DIR}/lib/libsdsl.a)
-set_target_properties(gramtools
-        PROPERTIES
-        ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/cmake-build-debug/lib
-        LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/cmake-build-debug/lib)
 add_dependencies(gramtools
         sdsl
         zlib
         htslib
         boost
         py_git_version)
-add_custom_command(TARGET gramtools POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-        ${PROJECT_SOURCE_DIR}/gramtools/lib
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${PROJECT_SOURCE_DIR}/cmake-build-debug/lib/libgramtools.a
-        ${PROJECT_SOURCE_DIR}/gramtools/lib
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${PROJECT_SOURCE_DIR}/cmake-build-debug/libgramtools/lib/*
-        ${PROJECT_SOURCE_DIR}/gramtools/lib)
 
 # gram executable
 add_executable(gram
@@ -150,15 +137,8 @@ target_link_libraries(gram LINK_PUBLIC
         ${CMAKE_CURRENT_BINARY_DIR}/lib/libsdsl.a)
 set_target_properties(gram
         PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/cmake-build-debug/bin
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON)
-add_custom_command(TARGET gram POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-        ${PROJECT_SOURCE_DIR}/gramtools/bin
-        COMMAND ${CMAKE_COMMAND} -E copy
-        ${PROJECT_SOURCE_DIR}/cmake-build-debug/bin/gram
-        ${PROJECT_SOURCE_DIR}/gramtools/bin)
 
 # tests
 enable_testing()
