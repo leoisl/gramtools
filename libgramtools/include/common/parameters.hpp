@@ -49,8 +49,11 @@ namespace gram {
         std::string allele_sum_coverage_fpath;
         std::string allele_base_coverage_fpath;
         std::string grouped_allele_counts_fpath;
+        
+        std::string read_stats_fpath;
 
         uint32_t maximum_threads;
+        uint32_t seed;
     };
 
 }

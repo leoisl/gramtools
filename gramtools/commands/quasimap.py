@@ -18,28 +18,48 @@ log = logging.getLogger('gramtools')
 def parse_args(common_parser, subparsers):
     parser = subparsers.add_parser('quasimap',
                                    parents=[common_parser])
-    parser.add_argument('--gram-directory',
-                        help='',
-                        type=str)
-    parser.add_argument('--reads',
-                        help='',
-                        action="append",
-                        type=str)
+    parser.add_argument('--gram-dir','--gram-directory',
+                        help='Directory containing outputs from gramtools `build`',
+                        dest='gram_dir',
+                        type=str,
+                        required=True)
 
-    # deprecated, use --output-directory
-    parser.add_argument('--run-directory',
-                        help='',
+    parser.add_argument('--run-dir','--run-directory',
+                        help='Common directory for gramtools running commands. Will contain quasimap outputs.'
+                             'These are JSON formatted files describing read coverage over variant sites in the prg.',
                         type=str,
-                        required=False)
-    parser.add_argument('--output-directory',
-                        help='',
+                        dest='run_dir',
+                        required=True)
+
+    parser.add_argument('--reads',
+                        help='One or more read files.\n'
+                             'Valid formats: fastq, sam/bam/cram, fasta, txt; compressed or uncompressed; fuzzy extensions (eg fq, fsq for fastq).\n'
+                             'Read files can be given after one or several \'--reads\' argument:'
+                             'Eg \'--reads rf_1.fq rf_2.fq.gz --reads rf_3.bam \'',
+                        nargs='+',
+                        action="append",
                         type=str,
-                        required=False)
+                        required=True)
 
     parser.add_argument('--max-threads',
-                        help='',
+                        help='Read quasimapping to the prg can be multi-threaded.'
+                             'By default, uses just one thread.',
                         type=int,
                         default=1,
+                        required=False)
+
+    parser.add_argument('--seed',
+                        help='Use this for fixing seed. Fixing seed will produce consistent coverage output across different runs.'
+                             'By default, seed is randomly generated.',
+                        type=int,
+                        default=0,
+                        required=False)
+
+    parser.add_argument('--output-directory',
+                        help='[Deprecated: use --run-dir instead].\n'
+                             'Directory where outputs of quasimap will be stored.'
+                             'Defaults to \'quasimap_outputs\' inside \'gram-dir\'.',
+                        type=str,
                         required=False)
 
 
@@ -53,11 +73,12 @@ def _execute_command(quasimap_paths, report, args):
     command = [
         common.gramtools_exec_fpath,
         'quasimap',
-        '--gram', quasimap_paths['project'],
-        '--reads', ' '.join(quasimap_paths['reads']),
+        '--gram', quasimap_paths['gram_dir'],
+        '--reads', ' '.join(quasimap_paths['reads_files']),
         '--kmer-size', str(args.kmer_size),
-        '--run-directory', quasimap_paths['quasimap_run_dirpath'],
+        '--run-directory', quasimap_paths['quasimap_dir'],
         '--max-threads', str(args.max_threads),
+        '--seed', str(args.seed),
     ]
 
     command_str = ' '.join(command)
@@ -72,7 +93,7 @@ def _execute_command(quasimap_paths, report, args):
                                       env={'LD_LIBRARY_PATH': common.lib_paths})
 
     command_result, entire_stdout = common.handle_process_result(process_handle)
-    log.info('Output run directory:\n%s', quasimap_paths['quasimap_run_dirpath'])
+    log.info('Output run directory:\n%s', quasimap_paths['quasimap_dir'])
 
     report['return_value_is_0'] = command_result
     report['gramtools_cpp_quasimap'] = collections.OrderedDict([
@@ -109,13 +130,12 @@ def _save_report(start_time,
         json.dump(_report, fhandle, indent=4)
 
 
-def _load_build_report(args):
-    build_paths = paths.generate_build_paths(args)
+def _load_build_report(project_paths):
     try:
-        with open(build_paths['build_report']) as fhandle:
+        with open(project_paths['build_report']) as fhandle:
             return json.load(fhandle)
     except FileNotFoundError:
-        log.error("Build report not found: %s", build_paths['build_report'])
+        log.error("Build report not found: %s. Try re-running gramtools `build`?", project_paths['build_report'])
         exit(1)
 
 
@@ -128,32 +148,42 @@ def _check_build_success(build_report):
 def run(args):
     log.info('Start process: quasimap')
 
-    build_report = _load_build_report(args)
+    if args.output_directory is not None:
+        log.warning("DEPRECATED Option: '--output-directory'. Please use '--run-dir' in the future instead.")
+        args.run_dir = args.output_directory
+
+    start_time = str(time.time()).split('.')[0]
+    _paths = paths.generate_quasimap_paths(args)
+
+    build_report = _load_build_report(_paths)
     _check_build_success(build_report)
 
     kmer_size = build_report['kmer_size']
     setattr(args, 'kmer_size', kmer_size)
 
-    if args.run_directory is not None:
-        log.warning("Deprecated argument: --run-directory; instead use: --output-directory")
-        args.output_directory = args.run_directory
-
-    start_time = str(time.time()).split('.')[0]
-    command_paths = paths.generate_quasimap_paths(args, start_time)
-    paths.check_project_file_structure(command_paths)
-
     report = collections.OrderedDict()
-    report = _execute_command(command_paths, report, args)
+    report = _execute_command(_paths, report, args)
+
+    ## Get the read statistics; report if most variant sites have no coverage.
+    with open(_paths['read_stats']) as f:
+        read_stats = json.load(f)
+
+    num_sites_noCov, num_sites_total = read_stats["Read_depth"]["num_sites_noCov"], read_stats["Read_depth"]["num_sites_total"]
+    if num_sites_noCov / num_sites_total > 0.5:
+        log.warning("More than 50% of all variant sites have no coverage ({} out of {})."
+                    "Possible reasons include: reads not quality-trimmed; low sequencing depth."\
+                    .format(num_sites_noCov, num_sites_total))
+
 
     log.debug('Computing sha256 hash of project paths')
-    command_hash_paths = common.hash_command_paths(command_paths)
+    command_hash_paths = common.hash_command_paths(_paths)
 
-    log.debug('Saving command report:\n%s', command_paths['run_report'])
+    log.debug('Saving command report:\n%s', _paths['report'])
     _save_report(start_time,
                  report,
-                 command_paths,
+                 _paths,
                  command_hash_paths,
-                 command_paths['run_report'])
+                 _paths['report'])
     log.info('End process: quasimap')
 
     if report.get('return_value_is_0') is False:

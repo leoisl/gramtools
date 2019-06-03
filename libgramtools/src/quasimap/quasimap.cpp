@@ -9,6 +9,7 @@
 #include "common/timer_report.hpp"
 #include "common/parameters.hpp"
 #include "common/utils.hpp"
+#include "common/read_stats.hpp"
 
 #include "search/search.hpp"
 
@@ -24,6 +25,11 @@ using namespace gram;
 void commands::quasimap::run(const Parameters &parameters) {
     std::cout << "Executing quasimap command" << std::endl;
     auto timer = TimerReport();
+   
+    ReadStats readstats;
+    
+    std::string first_reads_fpath = parameters.reads_fpaths[0];
+    readstats.compute_base_error_rate(first_reads_fpath);
 
     timer.start("Load data");
     std::cout << "Loading PRG data" << std::endl;
@@ -34,7 +40,11 @@ void commands::quasimap::run(const Parameters &parameters) {
 
     std::cout << "Running quasimap" << std::endl;
     timer.start("Quasimap");
-    auto quasimap_stats = quasimap_reads(parameters, kmer_index, prg_info);
+    auto quasimap_stats = quasimap_reads(parameters, kmer_index, prg_info, readstats);
+    
+    // Commit the read stats into quasimap output dir.
+    std::cout << "Writing read stats to " << parameters.read_stats_fpath << std::endl;
+    readstats.serialise(parameters.read_stats_fpath);
 
     std::cout << std::endl;
     std::cout << "The following counts include generated reverse complement reads."
@@ -47,9 +57,11 @@ void commands::quasimap::run(const Parameters &parameters) {
     timer.report();
 }
 
+
 QuasimapReadsStats gram::quasimap_reads(const Parameters &parameters,
                                         const KmerIndex &kmer_index,
-                                        const PRG_Info &prg_info) {
+                                        const PRG_Info &prg_info,
+                                        ReadStats &readstats) {
     std::cout << "Generating allele quasimap data structure" << std::endl;
     // The coverage structure records mapped allele counts (per site), aggregated from all mapped reads
     auto coverage = coverage::generate::empty_structure(prg_info);
@@ -68,6 +80,10 @@ QuasimapReadsStats gram::quasimap_reads(const Parameters &parameters,
                          kmer_index,
                          prg_info);
     }
+    
+    //Compute read mapping statistics (used in `infer` command)
+    readstats.compute_coverage_depth(coverage);
+    
     // Write coverage results to disk
     coverage::dump::all(coverage, parameters);
     return quasimap_stats;
@@ -181,8 +197,7 @@ bool gram::quasimap_read(const Pattern &read,
                          Coverage &coverage,
                          const KmerIndex &kmer_index,
                          const PRG_Info &prg_info,
-                         const Parameters &parameters,
-                         const uint32_t &random_seed) {
+                         const Parameters &parameters) {
     auto kmer = get_kmer_from_read(parameters.kmers_size, read); // Gets last k bases of read
 
     auto search_states = search_read_backwards(read, kmer, kmer_index, prg_info);
@@ -191,6 +206,8 @@ bool gram::quasimap_read(const Pattern &read,
     if (not read_mapped_exactly)
         return read_mapped_exactly;
     auto read_length = read.size();
+
+    uint64_t  random_seed = parameters.seed;
     coverage::record::search_states(coverage,
                                     search_states,
                                     read_length,

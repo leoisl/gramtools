@@ -4,6 +4,7 @@
 #include "parameters.hpp"
 #include "kmer_index/kmer_index_types.hpp"
 #include "quasimap/coverage/types.hpp"
+#include "common/read_stats.hpp"
 
 
 #ifndef GRAMTOOLS_QUASIMAP_HPP
@@ -26,7 +27,8 @@ namespace gram {
      */
     QuasimapReadsStats quasimap_reads(const Parameters &parameters,
                                       const KmerIndex &kmer_index,
-                                      const PRG_Info &prg_info);
+                                      const PRG_Info &prg_info,
+                                      ReadStats &readstats);
 
     /**
      * Load and process (ie map) reads from a given read file using a buffer to reduce disk I/O calls
@@ -52,7 +54,7 @@ namespace gram {
      * @return
      */
     bool quasimap_read(const Pattern &read, Coverage &coverage, const KmerIndex &kmer_index, const PRG_Info &prg_info,
-                       const Parameters &parameters, const uint32_t &random_seed = 0);
+                       const Parameters &parameters);
 
     Pattern get_kmer_from_read(const uint32_t &kmer_size, const Pattern &read);
 

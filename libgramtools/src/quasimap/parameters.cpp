@@ -19,7 +19,9 @@ Parameters commands::quasimap::parse_parameters(po::variables_map &vm,
                                 ("run-directory", po::value<std::string>(),
                                  "the directory where to store all quasimap output files")
                                 ("max-threads", po::value<uint32_t>()->default_value(1),
-                                 "maximum number of threads used");
+                                 "maximum number of threads used")
+                                ("seed", po::value<uint32_t>()->default_value(0),
+                                        "seed for pseudo-random selection of multi-mapping reads. the default of 0 produces a random seed.");
 
     std::vector<std::string> opts = po::collect_unrecognized(parsed.options,
                                                              po::include_positional);
@@ -50,7 +52,10 @@ Parameters commands::quasimap::parse_parameters(po::variables_map &vm,
     parameters.allele_sum_coverage_fpath = full_path(run_dirpath, "allele_sum_coverage");
     parameters.allele_base_coverage_fpath = full_path(run_dirpath, "allele_base_coverage.json");
     parameters.grouped_allele_counts_fpath = full_path(run_dirpath, "grouped_allele_counts_coverage.json");
+    
+    parameters.read_stats_fpath = full_path(run_dirpath, "read_stats.json");
 
     parameters.maximum_threads = vm["max-threads"].as<uint32_t>();
+    parameters.seed = vm["seed"].as<uint32_t>();
     return parameters;
 }

@@ -222,24 +222,6 @@ SA_Interval gram::base_next_sa_interval(const Marker &next_char,
     return SA_Interval{new_start, new_end};
 }
 
-void gram::process_search_state_path_cache(SearchState &search_state) {
-    if (not search_state.cache_populated)
-        return;
-
-    const auto &last_variant_site = search_state.variant_site_path.front();
-    //  To avoid rewriting the cache to path, if it has been already
-    const auto cached_variant_site_already_recorded = search_state.cached_variant_site
-                                                      == last_variant_site;
-
-    if (not cached_variant_site_already_recorded) {
-        search_state.variant_site_path.push_front(search_state.cached_variant_site);
-    }
-
-    search_state.cached_variant_site.first = 0;
-    search_state.cached_variant_site.second = 0;
-    search_state.cache_populated = false;
-}
-
 SearchStates gram::search_base_backwards(const Base &pattern_char,
                                          const SearchStates &search_states,
                                          const PRG_Info &prg_info) {
@@ -256,8 +238,6 @@ SearchStates gram::search_base_backwards(const Base &pattern_char,
                                                                       prg_info);
         if (new_search_state.invalid)
             continue;
-        // Dump the cache contents to the `SearchState`'s variant site path, if conditions are met.
-        process_search_state_path_cache(new_search_state);
         new_search_states.emplace_back(new_search_state);
     }
 
@@ -394,13 +374,12 @@ SearchStates get_allele_search_states(const Marker &site_boundary_marker,
 
         search_state.variant_site_state
                 = SearchVariantSiteState::within_variant_site;
-        search_state.cache_populated = true;
 
         // Populate the cache with which site/allele combination the `SearchState` maps into.
         auto allele_number = get_allele_id(allele_marker_sa_index,
                                            prg_info); // The alleles are not sorted by ID in the SA, need a specific routine.
-        search_state.cached_variant_site.first = site_boundary_marker;
-        search_state.cached_variant_site.second = allele_number;
+
+        search_state.variant_site_path.push_front(VariantLocus{site_boundary_marker,allele_number});
 
         search_states.emplace_back(search_state);
     }
@@ -423,9 +402,7 @@ SearchState get_site_search_state(const AlleleId &final_allele_id,
     search_state.variant_site_state
             = SearchVariantSiteState::within_variant_site;
 
-    search_state.cached_variant_site.first = boundary_marker_info.marker_char;
-    search_state.cached_variant_site.second = final_allele_id;
-    search_state.cache_populated = true;
+    search_state.variant_site_path.push_front(VariantLocus{boundary_marker_info.marker_char,final_allele_id});
 
     return search_state;
 }
@@ -477,24 +454,31 @@ SearchStates entering_site_search_states(const SiteBoundaryMarkerInfo &boundary_
  * Deals with a read mapping leaving a variant site.
  * Create a new `SearchState` with SA interval the index of the site variant's entry point.
  * Populate the cache with variant path taken, if such information was not yet recorded.
+ * @note we need to check whether we have previously entered the site.
+ * For an explanation why, @see process_allele_marker()
  */
 SearchState exiting_site_search_state(const SiteBoundaryMarkerInfo &boundary_marker_info,
                                       const SearchState &current_search_state,
                                       const PRG_Info &prg_info) {
     SearchState new_search_state = current_search_state;
-    bool read_started_in_allele = current_search_state.variant_site_state
-                                  == SearchVariantSiteState::unknown;
-    // The read has not entered a variant site yet, so the cache is not yet populated. Let's do that.
-    if (read_started_in_allele) {
-        new_search_state.cache_populated = true;
-        new_search_state.cached_variant_site.first = boundary_marker_info.marker_char;
-        new_search_state.cached_variant_site.second = 1; // allele ID is 1 because we are at site entry point.
+
+    // A check is required if we do not have certainty that we have previously entered the variant site.
+    bool check_required = new_search_state.variant_site_state != SearchVariantSiteState::within_variant_site;
+    if (check_required) {
+
+        bool started_in_site = new_search_state.variant_site_path.empty();
+        if (started_in_site){
+            const auto boundary_marker_char = boundary_marker_info.marker_char;
+            auto allele_id = 1; // We are at site exit point mapping backwards, so at first allele of variant site.
+            new_search_state.variant_site_path.push_front(VariantLocus{boundary_marker_char,allele_id});
+        }
     }
 
-    new_search_state.variant_site_state
-            = SearchVariantSiteState::outside_variant_site;
     new_search_state.sa_interval.first = boundary_marker_info.sa_interval.first;
     new_search_state.sa_interval.second = boundary_marker_info.sa_interval.second;
+    new_search_state.variant_site_state
+            = SearchVariantSiteState::outside_variant_site;
+
     return new_search_state;
 }
 
@@ -503,28 +487,13 @@ MarkersSearchResults gram::left_markers_search(const SearchState &search_state,
     MarkersSearchResults markers_search_results;
 
     const auto &sa_interval = search_state.sa_interval;
-    auto max_sa_index = sa_interval.second;
-    auto sa_index = sa_interval.first;
 
-    //  Compute number of allele and site markers before the left index of SA interval
-    auto num_markers_before = prg_info.bwt_markers_rank(sa_index);
-    uint64_t marker_count_offset = num_markers_before + 1;
-    //  Checks if the left index of SA interval is past the last marker; if so, there are no markers in the SA interval
-    if (marker_count_offset > prg_info.markers_mask_count_set_bits)
-        return markers_search_results;
+    for (int index=sa_interval.first; index<= sa_interval.second; index++) {
+        if (prg_info.bwt_markers_mask[index] == 0) continue;
 
-    //  Retrieve the position of the first marker past all the ones less than the SA interval start
-    auto bwt_marker_index = prg_info.bwt_markers_select(marker_count_offset);
-
-    while (bwt_marker_index <= max_sa_index) {
-        auto marker = prg_info.fm_index.bwt[bwt_marker_index];
-        auto search_result = std::make_pair(bwt_marker_index, marker);
+        auto marker = prg_info.fm_index.bwt[index];
+        auto search_result = std::make_pair(index, marker);
         markers_search_results.emplace_back(search_result);
-
-        ++marker_count_offset;
-        if (marker_count_offset > prg_info.markers_mask_count_set_bits)
-            return markers_search_results;
-        bwt_marker_index = prg_info.bwt_markers_select(marker_count_offset);
     }
 
     return markers_search_results;
@@ -564,6 +533,16 @@ SearchStates process_boundary_marker(const Marker &marker_char,
 /**
  * Procedure for exiting a variant site due to having hit an allele marker.
  * Builds a size 1 SA interval corresponding to the entry point of the corresponding site marker.
+ * @note we need to check whether we have previously entered the site.
+ * If we have not, this can be due to two things:
+ * 1. We started mapping from inside the variant site. In which case, we need to record traversing this site.
+ * 2. We started mapping from outside the variant site, went in- and recorded traversal.
+ *  But the information of being within_site was lost when serialising the kmer index to disk.
+ *  We do not want to duplicate recording this site.
+ *
+ * Checking whether we have never recorded traversing a single site, means that we started in-site, and so we record traversal (case 1).
+ * Conversely, if if we have ever recorded traversing a site, we know it has been committed to the variant site path, so we do not record (case 2).
+ * @see exiting_site_search_state()
  */
 SearchState process_allele_marker(const Marker &allele_marker_char,
                                   const SA_Index &sa_right_of_marker,
@@ -577,7 +556,7 @@ SearchState process_allele_marker(const Marker &allele_marker_char,
     auto first_sa_index = prg_info.fm_index.C[alphabet_rank];
     auto second_sa_index = first_sa_index + 1; // Variant site markers are adjacent in the suffix array.
 
-    // Determine which SA index position marks the variant site entrance by looking at the prg.
+    // Determine which SA index position marks the variant site entrance by comparing the prg indices.
     SA_Index boundary_start_sa_index;
     bool boundary_start_is_first_sa = prg_info.fm_index[first_sa_index]
                                       < prg_info.fm_index[second_sa_index];
@@ -587,21 +566,23 @@ SearchState process_allele_marker(const Marker &allele_marker_char,
         boundary_start_sa_index = second_sa_index;
 
     auto new_search_state = current_search_state;
+
+    // A check is required if we do not have certainty that we have previously entered the variant site.
+    bool check_required = new_search_state.variant_site_state != SearchVariantSiteState::within_variant_site;
+    if (check_required) {
+
+        bool started_in_site = new_search_state.variant_site_path.empty();
+        if (started_in_site){
+            auto internal_allele_text_index = prg_info.fm_index[sa_right_of_marker];
+            auto allele_id = (AlleleId) prg_info.allele_mask[internal_allele_text_index]; // Query the allele mask with the prg position of the character to the right of the allele marker.
+            new_search_state.variant_site_path.push_front(VariantLocus{boundary_marker_char,allele_id});
+        }
+    }
+
     new_search_state.sa_interval.first = boundary_start_sa_index;
     new_search_state.sa_interval.second = boundary_start_sa_index;
     new_search_state.variant_site_state = SearchVariantSiteState::outside_variant_site;
 
-    auto internal_allele_text_index = prg_info.fm_index[sa_right_of_marker];
-    auto allele_id = (AlleleId) prg_info.allele_mask[internal_allele_text_index]; // Query the allele mask with the prg position of the character to the right of the allele marker.
-
-    const auto &cached_variant_site = new_search_state.variant_site_path.front();
-    bool read_started_within_allele = cached_variant_site.first != boundary_marker_char
-                                      or cached_variant_site.second != allele_id;
-    if (read_started_within_allele) {
-        new_search_state.cached_variant_site.first = boundary_marker_char;
-        new_search_state.cached_variant_site.second = allele_id;
-        new_search_state.cache_populated = true;
-    }
     return new_search_state;
 }
 
@@ -663,37 +644,6 @@ std::string gram::serialize_search_state(const SearchState &search_state) {
                 ss << "[" << marker << ", " << allele_id << "]" << std::endl;
             }
         }
-    }
-    /**
-    ss << "Variant site state: ";
-    switch (search_state.variant_site_state) {
-        case SearchVariantSiteState::within_variant_site:
-            ss << "within_variant_site";
-        case SearchVariantSiteState::outside_variant_site:
-            ss << "outside_variant_site";
-        case SearchVariantSiteState::unknown:
-            ss << "unknown";
-    }
-    ss << std::endl;
-     */
-
-    switch (search_state.cache_populated) {
-        case true:
-            ss << "Cache populated: true" << std::endl;
-            break;
-        default:
-            ss << "Cache populated: false" << std::endl;
-            break;
-    }
-    if (search_state.cache_populated
-        and search_state.cached_variant_site.first != 0) {
-        const auto &marker = search_state.cached_variant_site.first;
-        const auto &allele_id = search_state.cached_variant_site.second;
-        ss << "Cached variant site: "
-           << "[marker=" << marker
-           << ", allele_id=" << allele_id
-           << "]"
-           << std::endl;
     }
     ss << "****** END Search State ******" << std::endl;
     return ss.str();
